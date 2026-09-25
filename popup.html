@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iClicker Majority</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="theme.css">
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="mark" aria-hidden="true">M</div>
+    <div><h1>iClicker Majority</h1><p class="subtitle">Follow the leader, with an optional fallback.</p></div>
+  </header>
+  <main>
+    <section class="card" aria-label="Current poll">
+      <span class="label">This tab</span><span id="state">Connecting</span>
+      <p id="message" role="status" aria-live="polite">Connecting to iClicker...</p>
+      <p id="question" hidden></p>
+      <div id="votes" aria-label="Class response distribution"></div>
+    </section>
+    <label class="option">
+      <input id="random-fallback" type="checkbox" aria-describedby="fallback-description" disabled>
+      <span>Random fallback</span>
+    </label>
+    <p id="fallback-description" class="option-detail">When live votes are unavailable, pick one random enabled letter per unanswered question. Keep existing answers; follow a stable leader if counts become available. Off by default.</p>
+    <button id="toggle" type="button" disabled>Start auto-select</button>
+    <section class="history-panel" aria-labelledby="history-title">
+      <div class="history-heading">
+        <h2 id="history-title">Answer history</h2>
+        <button id="clear-history" class="secondary" type="button" disabled>Clear history</button>
+      </div>
+      <p id="history-summary" class="option-detail">Loading saved selections...</p>
+      <p id="history-error" role="alert" hidden></p>
+      <ol id="history-list" aria-label="Automatic selections, newest first"></ol>
+      <p class="option-detail">Last 200 automatic selections, saved only in this browser. These are selection attempts, not submission receipts. Manual answers are not logged.</p>
+    </section>
+    <p class="notice"><strong>Starting allows automatic answer submissions.</strong> While this tab stays open, the extension checks every 5 seconds and follows a leader after two readings. Ties keep your answer unchanged.</p>
+    <p class="notice">Majority selection requires live class results. Random fallback does not reveal hidden votes or find the correct answer. Most popular does not mean correct.</p>
+    <p class="notice privacy">Local history only; no analytics or third-party servers. Use only where your course permits automation. <a href="https://student.iclicker.com" target="_blank" rel="noopener noreferrer">Open iClicker</a></p>
+  </main>
+</body>
+</html>

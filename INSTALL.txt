@@ -1,0 +1,114 @@
+iClicker Majority - Chrome extension
+
+INSTALL
+1. If using the ZIP, extract it first.
+2. Open chrome://extensions in Chrome.
+3. Turn on Developer mode.
+4. Click Load unpacked and choose the folder containing manifest.json.
+5. Refresh any already-open student.iclicker.com tab.
+6. Sign in normally, join your class, and open the extension popup.
+7. Optionally turn on Random fallback to choose a random letter when live
+   vote counts are unavailable. It is off by default.
+8. Click Start auto-select. This authorizes automatic answer submissions
+   through iClicker's normal answer buttons for this tab.
+
+UPDATING
+Replace your extracted files with the updated ZIP, or use the updated source
+folder. Click Reload for iClicker Majority on chrome://extensions, refresh
+the iClicker tab, and turn on Random fallback if desired before starting.
+
+HOW IT WORKS
+Checks the current individual A-E poll every five seconds. The same answer
+must lead in two consecutive readings before it is selected. If a different
+answer becomes the stable leader, the selection changes. A tie keeps your
+existing answer unchanged.
+The leader is the most popular answer (a plurality), not necessarily >50%.
+
+RANDOM FALLBACK (OPTIONAL)
+When enabled, missing vote counts, zero responses, or a 403/404 from the
+reporting endpoint trigger a random choice from visible, enabled A-E buttons.
+The same random letter is retained for that question instead of re-rolling
+every five seconds. Existing selections, including manual answers, are kept.
+If readable counts arrive later, the usual two-reading majority rule resumes.
+Denied or missing reporting endpoints are not retried for the same question.
+A random choice is a guess, not a detected majority or correct answer.
+
+The active question must still be identified and verified as open through
+the student API. Random fallback does not bypass sign-in, class access,
+question checks, or disabled buttons. Network failures, rate limits, and
+malformed data do not trigger guesses. With fallback off, unavailable counts
+leave your answer unchanged, and access errors stop the extension as before.
+
+The extension does not log in, join classes, fake attendance, solve questions,
+answer quizzes, or handle multiple-answer, numeric, text, target, or group polls.
+You must keep the class tab open. Chrome can throttle background/sleeping tabs.
+Click Pause to stop. Refreshing or closing the tab resets it to paused and
+turns Random fallback off. Closing only the popup keeps the tab settings.
+Use one running tab per class to avoid conflicting selections.
+
+ANSWER HISTORY
+The popup lists the last 200 automatic selection attempts, newest first.
+Each entry shows the question label, selected letter, time, course identifier,
+and source: Random or Live votes. Live-vote entries include the percentage
+observed when the choice was made.
+
+The source is recorded at the moment of the automatic click. A random answer
+that later happens to match the majority stays labeled Random. If a live
+majority causes a different letter to be selected, a new Live votes entry
+appears; the earlier random pick remains in the history.
+
+Manual or already-selected answers are not logged or credited to the
+extension. Repeated checks of the same selection do not create duplicates.
+History records clicks, not confirmed server submissions or correct answers.
+If a click fails to submit, its selection attempt still appears in history.
+Check iClicker's own confirmation for submission status.
+
+History persists across popup closure, tab refresh, and browser restarts.
+You can view it from the extension popup even outside an iClicker tab.
+Clear history removes all stored entries; future automatic clicks are still
+recorded. It does not stop automation. Uninstalling removes stored history.
+Older entries are automatically dropped once the 200-entry limit is reached.
+Logging starts with this version and cannot reconstruct previous choices.
+If saving history fails, automation pauses with an explicit error instead of
+continuing with untracked selections.
+
+IMPORTANT LIMITATION
+This is an independent extension, not affiliated with iClicker or ByeClicker.
+It uses the current student API response shapes and answer controls inspected
+in the public iClicker web client. Its API has no compatibility guarantee.
+Live authenticated compatibility has not been established for your account.
+
+The student reporting API must expose current class response percentages
+while voting is still open. Some courses/accounts may not provide this.
+Results available only after a poll closes cannot be used to answer it.
+A 401, a 403/404 outside the reporting endpoint, malformed data, or an
+unconfirmed submission stops the extension with an explanation.
+Reporting 403/404 errors also stop it unless Random fallback is enabled.
+It does not bypass access restrictions.
+If the live-data prerequisite is not met, this cannot perform majority voting.
+No algorithm can infer an actual class majority from hidden vote counts.
+
+PRIVACY AND PERMISSIONS
+Runs only on https://student.iclicker.com.
+Reads your existing iClicker session token in memory and sends it only to
+https://api.iclicker.com for authorized student GET requests.
+The selection history stores course/activity/question identifiers, question
+labels, answer letters, sources, timestamps, and the leading percentage for
+live-vote selections locally in this Chrome profile (not Chrome Sync).
+No credentials, question images, full question text, or complete vote
+distributions are stored. No data is sent to third-party services.
+Redirects are rejected. No analytics, external libraries, or broad tab access.
+The storage permission and a small event-driven background service worker
+keep history consistent across tabs. The worker never calls iClicker's API.
+activeTab is used to connect the popup to the tab you opened it from.
+Chrome's content-script isolation does not bypass API CORS restrictions.
+
+COURSE RULES
+Use only where your course permits automation. Popular answers can be wrong.
+The extension's automatic clicks submit answers through the normal iClicker
+interface. Always check iClicker's own confirmation.
+
+DEVELOPMENT
+Requires Node.js 18+ only for tests, not to use the extension.
+From this folder: node --test
+No build step or package installation is required.

@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "iClicker Majority",
+  "version": "1.2.0",
+  "description": "Follows live A-E votes, offers a random fallback, and keeps a local history of each automatic selection.",
+  "minimum_chrome_version": "111",
+  "permissions": ["activeTab", "storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "iClicker Majority",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://student.iclicker.com/*"],
+      "js": ["core.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
+}

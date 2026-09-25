@@ -114,7 +114,42 @@
     }
   }
 
-  const api = { DataError, id, courseFromUrl, activeQuestion, leadingAnswer, Stability };
+  function majorityVisibility(status, now = Date.now()) {
+    const results = status.liveResults;
+    if (status.kind === "disconnected") {
+      return { state: "unknown", label: "Not connected", detail: "Open the extension on an iClicker tab to check." };
+    }
+    if (results?.state === "unavailable" || results?.state === "error") {
+      return { state: "no", label: "No", detail: "Live counts cannot be read. Random picks are not majority votes." };
+    }
+    if (status.kind === "error") {
+      return { state: "unknown", label: "Unknown", detail: "The current majority cannot be confirmed. See the error below." };
+    }
+    if (!status.enabled) {
+      return { state: "unknown", label: "Not checking", detail: "Start auto-select in a live poll to check vote visibility." };
+    }
+    if (!results) {
+      return { state: "unknown", label: "Checking", detail: "Waiting for readable results from the current live poll." };
+    }
+    const age = now - results.checkedAt;
+    if (!Number.isFinite(results.checkedAt) || age < 0 || age > 20000) {
+      return { state: "unknown", label: "Out of date", detail: "Waiting for a fresh live-vote check. The previous result is not current." };
+    }
+    if (results.state === "empty") {
+      return { state: "waiting", label: "No votes yet", detail: "Vote counts are visible, but no one has responded yet." };
+    }
+    if (results.state === "available" && results.outcome === "tie") {
+      return { state: "waiting", label: "Tied", detail: "Vote counts are visible, but there is no single leading answer." };
+    }
+    if (results.state === "available" && results.outcome === "leader" &&
+        /^[A-E]$/.test(results.answer) && typeof results.percentage === "number" &&
+        Number.isFinite(results.percentage) && results.percentage > 0 && results.percentage <= 100) {
+      return { state: "yes", label: "Yes", detail: `${results.answer} leads with ${results.percentage}% of responses.` };
+    }
+    return { state: "unknown", label: "Unknown", detail: "The live response does not identify a readable majority." };
+  }
+
+  const api = { DataError, id, courseFromUrl, activeQuestion, leadingAnswer, Stability, majorityVisibility };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.IClickerMajority = Object.freeze(api);
 })(globalThis);

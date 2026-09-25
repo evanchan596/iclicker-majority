@@ -692,3 +692,42 @@ test("a report cooldown does not delay the next question or select after closure
     assert.deepEqual(h.state.clicked, closed ? ["C"] : ["C", "B"]);
   }
 });
+
+test("live visibility exposes the leader independently of the selected answer", async () => {
+  const h = createHarness();
+  h.state.selected = "D";
+  h.send("MAJORITY_START");
+  await h.step();
+  const status = h.send("MAJORITY_STATUS");
+  assert.equal(status.liveResults.outcome, "leader");
+  assert.equal(status.liveResults.answer, "B");
+  assert.equal(status.liveResults.percentage, 60);
+  assert.equal(Core.majorityVisibility(status, h.state.now).label, "Yes");
+  assert.deepEqual(h.state.clicked, []);
+});
+
+test("live visibility distinguishes ties, zero votes, and hidden results", async () => {
+  const h = createHarness();
+  h.send("MAJORITY_START");
+  for (const [votes, expected] of [
+    [{ A: 50, B: 50 }, "Tied"], [{ A: 0, B: 0 }, "No votes yet"], [{}, "No"]
+  ]) {
+    h.state.votes = votes;
+    await h.step();
+    assert.equal(Core.majorityVisibility(h.send("MAJORITY_STATUS"), h.state.now).label, expected);
+  }
+  assert.deepEqual(h.state.clicked, []);
+});
+
+test("closed questions and pausing remove the previous majority indicator", async () => {
+  const h = createHarness();
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.equal(Core.majorityVisibility(h.send("MAJORITY_STATUS"), h.state.now).label, "Yes");
+  h.state.beforeQuestion = () => { h.state.question.ended = "2026-09-25T02:00:00Z"; };
+  await h.step();
+  assert.equal(h.send("MAJORITY_STATUS").liveResults, null);
+  assert.equal(Core.majorityVisibility(h.send("MAJORITY_STATUS"), h.state.now).label, "Checking");
+  h.send("MAJORITY_STOP");
+  assert.equal(Core.majorityVisibility(h.send("MAJORITY_STATUS"), h.state.now).label, "Not checking");
+});

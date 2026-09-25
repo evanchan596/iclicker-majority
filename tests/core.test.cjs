@@ -88,3 +88,62 @@ test("requires two observations and resets across ties and question changes", ()
   assert.equal(stability.observe("q2", "B"), false);
   assert.equal(stability.observe("q2", "B"), true);
 });
+
+const now = Date.parse("2026-09-25T02:00:00Z");
+const readableStatus = {
+  enabled: true, kind: "observing",
+  liveResults: { state: "available", outcome: "leader", answer: "B", percentage: 40, checkedAt: now }
+};
+
+test("majority visibility clearly identifies a readable plurality leader", () => {
+  const visibility = Core.majorityVisibility(readableStatus, now);
+  assert.deepEqual(visibility, { state: "yes", label: "Yes", detail: "B leads with 40% of responses." });
+});
+
+test("random selections cannot be mistaken for a visible live majority", () => {
+  for (const state of ["unavailable", "error"]) {
+    const visibility = Core.majorityVisibility({
+      enabled: true, kind: "random", liveResults: { state, checkedAt: now }
+    }, now);
+    assert.equal(visibility.label, "No");
+    assert.equal(visibility.state, "no");
+  }
+});
+
+test("ties and zero votes are distinct from unreadable results", () => {
+  const tie = Core.majorityVisibility({
+    ...readableStatus, liveResults: { state: "available", outcome: "tie", checkedAt: now }
+  }, now);
+  assert.equal(tie.label, "Tied");
+  assert.match(tie.detail, /counts are visible/);
+  const empty = Core.majorityVisibility({
+    ...readableStatus, liveResults: { state: "empty", outcome: "empty", checkedAt: now }
+  }, now);
+  assert.equal(empty.label, "No votes yet");
+  assert.equal(empty.state, "waiting");
+});
+
+test("unchecked, stopped and disconnected states never claim votes are visible", () => {
+  assert.equal(Core.majorityVisibility({ enabled: false, kind: "off" }, now).label, "Not checking");
+  assert.equal(Core.majorityVisibility({ enabled: true, kind: "waiting" }, now).label, "Checking");
+  assert.equal(Core.majorityVisibility({ enabled: false, kind: "disconnected" }, now).label, "Not connected");
+  assert.equal(Core.majorityVisibility({ ...readableStatus, enabled: false }, now).label, "Not checking");
+  assert.equal(Core.majorityVisibility({ ...readableStatus, kind: "error" }, now).label, "Unknown");
+});
+
+test("old or invalid check timestamps do not display a current majority", () => {
+  assert.equal(Core.majorityVisibility(readableStatus, now + 20000).label, "Yes");
+  assert.equal(Core.majorityVisibility(readableStatus, now + 20001).label, "Out of date");
+  assert.equal(Core.majorityVisibility(readableStatus, now - 1).label, "Out of date");
+  assert.equal(Core.majorityVisibility({
+    ...readableStatus, liveResults: { ...readableStatus.liveResults, checkedAt: undefined }
+  }, now).label, "Out of date");
+});
+
+test("a readable report without a valid leader never yields a misleading yes", () => {
+  for (const invalid of [{ answer: "F" }, { percentage: NaN }, { percentage: 101 }, { outcome: undefined }]) {
+    assert.equal(Core.majorityVisibility({
+      ...readableStatus, liveResults: { ...readableStatus.liveResults, ...invalid }
+    }, now).label, "Unknown");
+  }
+});

@@ -215,6 +215,9 @@
           unavailableReports.delete(questionKey);
           liveResults = {
             state: ["leader", "tie"].includes(result.kind) ? "available" : result.kind,
+            outcome: result.kind,
+            answer: result.answer || null,
+            percentage: result.percentage ?? null,
             httpStatus: 200,
             checkedAt: Date.now(),
             retryAt: null,
@@ -299,6 +302,7 @@
           liveQuestion.activityId !== question.activityId ||
           liveQuestion.ended || liveQuestion.answerType !== "SINGLE_ANSWER" || liveQuestion.enableGroups) {
         stability.reset();
+        liveResults = null;
         publish("waiting", "The question changed or closed. No answer was selected.");
         return;
       }

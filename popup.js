@@ -4,6 +4,9 @@ const toggle = document.getElementById("toggle");
 const randomFallback = document.getElementById("random-fallback");
 const message = document.getElementById("message");
 const liveStatus = document.getElementById("live-status");
+const majorityIndicator = document.getElementById("majority-indicator");
+const majorityValue = document.getElementById("majority-value");
+const majorityDetail = document.getElementById("majority-detail");
 const state = document.getElementById("state");
 const question = document.getElementById("question");
 const votes = document.getElementById("votes");
@@ -79,6 +82,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.answerHistory) historyCommand();
 });
 
+function renderMajority(status) {
+  const visibility = globalThis.IClickerMajority.majorityVisibility(status);
+  majorityIndicator.dataset.visibility = visibility.state;
+  majorityValue.textContent = visibility.label;
+  majorityDetail.textContent = visibility.detail;
+}
+
 function render(status) {
   enabled = status.enabled;
   toggle.textContent = enabled ? "Pause auto-select" : "Start auto-select";
@@ -88,6 +98,7 @@ function render(status) {
   state.textContent = enabled ? "Running" : status.kind === "error" ? "Stopped" : "Paused";
   state.dataset.kind = status.kind;
   message.textContent = status.message;
+  renderMajority(status);
   const results = status.liveResults;
   liveStatus.hidden = !results;
   liveStatus.textContent = "";
@@ -124,6 +135,7 @@ function fail(text) {
   state.textContent = "Not connected";
   state.dataset.kind = "error";
   message.textContent = text;
+  renderMajority({ enabled: false, kind: "disconnected", liveResults: null });
   liveStatus.hidden = true;
   votes.replaceChildren();
   question.hidden = true;

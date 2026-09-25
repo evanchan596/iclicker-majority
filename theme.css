@@ -79,6 +79,22 @@ h1 { font-size: 20px; line-height: 1.2; margin: 0; letter-spacing: -0.4px; }
 #state[data-kind="error"] { color: var(--cp-danger); }
 #state[data-kind="selected"] { color: var(--cp-success); }
 #state[data-kind="random"] { color: var(--cp-warning); }
+.majority-indicator {
+  --cp-visibility-color: var(--cp-border-strong);
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--cp-surface-soft);
+  border: 1px solid var(--cp-border);
+  border-left: 4px solid var(--cp-visibility-color);
+  border-radius: 0.625rem;
+}
+.majority-indicator[data-visibility="yes"] { --cp-visibility-color: var(--cp-success); }
+.majority-indicator[data-visibility="no"] { --cp-visibility-color: var(--cp-danger); }
+.majority-indicator[data-visibility="waiting"] { --cp-visibility-color: var(--cp-warning); }
+.majority-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.majority-heading span { font-size: 12px; font-weight: 600; }
+#majority-value { font-size: 14px; }
+#majority-detail { font-size: 12px; margin: 8px 0 0; color: var(--cp-text-muted); }
 #message { min-height: 60px; margin: 12px 0 0; }
 #question { font-weight: 600; margin: 8px 0 0; }
 #votes { display: grid; gap: 8px; margin-top: 12px; }

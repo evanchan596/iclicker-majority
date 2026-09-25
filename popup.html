@@ -6,6 +6,7 @@
   <title>iClicker Majority</title>
   <script src="theme.js"></script>
   <link rel="stylesheet" href="theme.css">
+  <script src="core.js" defer></script>
   <script src="popup.js" defer></script>
 </head>
 <body>
@@ -16,6 +17,13 @@
   <main>
     <section class="card" aria-label="Current poll">
       <span class="label">This tab</span><span id="state">Connecting</span>
+      <div id="majority-indicator" class="majority-indicator" data-visibility="unknown" role="status" aria-live="polite" aria-atomic="true">
+        <div class="majority-heading">
+          <span>Majority vote visible</span>
+          <strong id="majority-value">Checking</strong>
+        </div>
+        <p id="majority-detail">Connecting to the iClicker tab...</p>
+      </div>
       <p id="message" role="status" aria-live="polite">Connecting to iClicker...</p>
       <p id="live-status" class="option-detail" hidden></p>
       <p id="question" hidden></p>

@@ -3,6 +3,7 @@
 const toggle = document.getElementById("toggle");
 const randomFallback = document.getElementById("random-fallback");
 const message = document.getElementById("message");
+const liveStatus = document.getElementById("live-status");
 const state = document.getElementById("state");
 const question = document.getElementById("question");
 const votes = document.getElementById("votes");
@@ -87,6 +88,16 @@ function render(status) {
   state.textContent = enabled ? "Running" : status.kind === "error" ? "Stopped" : "Paused";
   state.dataset.kind = status.kind;
   message.textContent = status.message;
+  const results = status.liveResults;
+  liveStatus.hidden = !results;
+  liveStatus.textContent = "";
+  if (results) {
+    const checked = new Date(results.checkedAt).toLocaleTimeString();
+    const retry = results.retryAt
+      ? ` Retrying in ${Math.max(0, Math.ceil((results.retryAt - Date.now()) / 1000))}s.`
+      : "";
+    liveStatus.textContent = `${results.message} Last checked ${checked}.${retry}`;
+  }
   question.hidden = !status.question;
   question.textContent = status.question || "";
   votes.replaceChildren();
@@ -113,6 +124,7 @@ function fail(text) {
   state.textContent = "Not connected";
   state.dataset.kind = "error";
   message.textContent = text;
+  liveStatus.hidden = true;
   votes.replaceChildren();
   question.hidden = true;
 }

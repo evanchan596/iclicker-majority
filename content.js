@@ -6,6 +6,7 @@
   const Core = globalThis.IClickerMajority;
   const API = "https://api.iclicker.com";
   const INTERVAL = 5000;
+  const REPORT_RETRY = 15000;
   const stability = new Core.Stability();
   const randomAnswers = new Map();
   const unavailableReports = new Map();
@@ -17,7 +18,8 @@
   let running = false;
   let route = location.href;
   let lastAttempt = null;
-  let status = { enabled, randomFallback, kind: "off", message: "Paused. Nothing will be selected.", rows: [] };
+  let liveResults = null;
+  let status = { enabled, randomFallback, liveResults, kind: "off", message: "Paused. Nothing will be selected.", rows: [] };
 
   class RequestError extends Error {
     constructor(message, permanent = false, retryAfter = INTERVAL, httpStatus = null) {
@@ -40,7 +42,7 @@
   }
 
   function publish(kind, message, extra = {}) {
-    status = { enabled, randomFallback, kind, message, rows: [], ...extra };
+    status = { enabled, randomFallback, liveResults, kind, message, rows: [], ...extra };
   }
 
   function getView() {
@@ -118,11 +120,12 @@
       const seconds = value && /^\d+$/.test(value) ? Number(value) : null;
       const until = value ? Date.parse(value) : NaN;
       const wait = seconds !== null ? seconds * 1000 : Number.isFinite(until) ? until - Date.now() : 60000;
-      throw new RequestError("iClicker requested a pause. Waiting before retrying.", false, Math.max(60000, wait));
+      throw new RequestError("iClicker requested a pause. Waiting before retrying.",
+        false, Math.max(60000, wait), response.status);
     }
     if (!response.ok) {
       throw new RequestError(`iClicker returned HTTP ${response.status}. No answer was selected.`,
-        response.status < 500, 15000);
+        response.status < 500, 15000, response.status);
     }
     try {
       return await response.json();
@@ -137,6 +140,7 @@
     clearTimeout(timer);
     pending?.abort();
     stability.reset();
+    liveResults = null;
     if (!preserveAttempt) lastAttempt = null;
   }
 
@@ -159,12 +163,14 @@
       const courseId = Core.courseFromUrl(url);
       if (!courseId) {
         stability.reset();
+        liveResults = null;
         publish("waiting", "Join your class and open a live single-answer poll.");
         return;
       }
       const view = getView();
       if (!view) {
         stability.reset();
+        liveResults = null;
         publish("waiting", "Waiting for a connected A-E single-answer poll. Quizzes and group polls are not supported.");
         return;
       }
@@ -174,11 +180,13 @@
       const question = Core.activeQuestion(sections);
       if (!question) {
         stability.reset();
+        liveResults = null;
         publish("waiting", "No open question was found.");
         return;
       }
       if (question.answerType !== "SINGLE_ANSWER" || question.enableGroups) {
         stability.reset();
+        liveResults = null;
         publish("unsupported", "Only individual, single-answer A-E polls are supported.");
         return;
       }
@@ -186,23 +194,57 @@
       const heading = ` ${view.heading} `;
       if (!questionName || !heading.includes(` ${questionName} `)) {
         stability.reset();
+        liveResults = null;
         publish("waiting", "Waiting for the displayed question to match the live poll.");
         return;
       }
       const questionKey = `${courseId}/${question.activityId}/${question.questionId}`;
       let result;
       try {
-        if (unavailableReports.has(questionKey)) throw unavailableReports.get(questionKey);
-        const report = await getJson(
-          `/v2/reporting/courses/${courseId}/activities/${question.activityId}/questions/view`,
-          controller.signal
-        );
-        result = Core.leadingAnswer(report, question.questionId, [...view.buttons.keys()]);
+        const unavailable = unavailableReports.get(questionKey);
+        if (unavailable && Date.now() < unavailable.retryAt) {
+          liveResults = unavailable;
+          result = { kind: "unavailable", rows: [] };
+        } else {
+          const report = await getJson(
+            `/v2/reporting/courses/${courseId}/activities/${question.activityId}/questions/view`,
+            controller.signal
+          );
+          if (!current() || !sameView(view)) return;
+          result = Core.leadingAnswer(report, question.questionId, [...view.buttons.keys()]);
+          unavailableReports.delete(questionKey);
+          liveResults = {
+            state: ["leader", "tie"].includes(result.kind) ? "available" : result.kind,
+            httpStatus: 200,
+            checkedAt: Date.now(),
+            retryAt: null,
+            message: result.kind === "unavailable" ? "The current question has no readable live results."
+              : result.kind === "empty" ? "The live report contains no votes yet."
+              : "Live vote counts are available."
+          };
+        }
       } catch (error) {
-        if (!(error instanceof RequestError) || !randomFallback ||
-            ![403, 404].includes(error.httpStatus)) throw error;
-        // Do not repeatedly request denied results for the same question.
-        unavailableReports.set(questionKey, error);
+        if (!current() || !sameView(view)) return;
+        if (!(error instanceof RequestError) || ![403, 404].includes(error.httpStatus)) {
+          liveResults = {
+            state: "error", httpStatus: error.httpStatus || null,
+            checkedAt: Date.now(), retryAt: null,
+            message: controller.signal.aborted ? "The live-results request timed out."
+              : `Live results could not be read: ${error.message}`
+          };
+          throw error;
+        }
+        // Missing reports can become readable during the same question; never cache them forever.
+        liveResults = {
+          state: "unavailable",
+          httpStatus: error.httpStatus,
+          checkedAt: Date.now(),
+          retryAt: Date.now() + REPORT_RETRY,
+          message: error.httpStatus === 403
+            ? "iClicker denied access to live results (HTTP 403)."
+            : "The live report is not available yet (HTTP 404)."
+        };
+        unavailableReports.set(questionKey, liveResults);
         result = { kind: "unavailable", rows: [] };
       }
       if (!current() || !sameView(view)) return;
@@ -211,7 +253,7 @@
       if (result.kind !== "leader" && !useRandom) {
         stability.reset();
         const messages = {
-          unavailable: "Live vote counts are unavailable. Enable Random fallback to pick a letter instead.",
+          unavailable: "Live vote counts are unavailable. Continuing to check; no answer has been changed.",
           empty: "No votes yet. Waiting for a clear leader.",
           tie: "The leading answers are tied. Keeping your current answer."
         };

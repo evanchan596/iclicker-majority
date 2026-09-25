@@ -14,6 +14,7 @@ function createHarness() {
   let nextTimer = 1;
   let listener;
   const state = {
+    now: Date.parse("2026-09-25T01:30:00Z"),
     heading: "Question 1",
     votes: { A: 20, B: 60, C: 20 },
     enabledControls: true,
@@ -60,7 +61,11 @@ function createHarness() {
   };
   const context = {
     IClickerMajority: Core,
-    URL, Map, Set, AbortController, Date, Error,
+    URL, Map, Set, AbortController, Error,
+    Date: class extends Date {
+      constructor(...args) { super(...(args.length ? args : [state.now])); }
+      static now() { return state.now; }
+    },
     Math: Object.assign(Object.create(Math), {
       random: () => state.randomValues[Math.min(state.randomCalls++, state.randomValues.length - 1)]
     }),
@@ -134,6 +139,7 @@ function createHarness() {
     const entry = [...timers].find(([, item]) => item.delay !== 12000);
     assert.ok(entry, "a polling timer should be scheduled");
     timers.delete(entry[0]);
+    state.now += entry[1].delay;
     await entry[1].fn();
   }
   return { state, location, send, step, timers, routeChanged: () => intervals[0]() };
@@ -185,17 +191,15 @@ test("ties, empty results, and stale report IDs never select a fallback", async 
   assert.deepEqual(h.state.clicked, []);
 });
 
-test("access denials and missing endpoints stop without retrying", async () => {
-  for (const code of [401, 403, 404]) {
-    const h = createHarness();
-    h.state.resultsStatus = code;
-    h.send("MAJORITY_START");
-    await h.step();
-    assert.equal(h.send("MAJORITY_STATUS").enabled, false);
-    assert.equal(h.send("MAJORITY_STATUS").kind, "error");
-    assert.equal(h.timers.size, 0);
-    assert.deepEqual(h.state.clicked, []);
-  }
+test("authentication errors stop without retrying or guessing", async () => {
+  const h = createHarness();
+  h.state.resultsStatus = 401;
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.equal(h.send("MAJORITY_STATUS").enabled, false);
+  assert.equal(h.send("MAJORITY_STATUS").kind, "error");
+  assert.equal(h.timers.size, 0);
+  assert.deepEqual(h.state.clicked, []);
 });
 
 test("rate limiting backs off instead of continuing the five-second cadence", async () => {
@@ -331,7 +335,7 @@ test("zero responses trigger fallback, but a visible tie does not", async () => 
   assert.deepEqual(h.state.clicked, ["C"]);
 });
 
-test("reporting 403/404 use fallback without repeating a denied request", async () => {
+test("reporting 403/404 use fallback without retrying during the cooldown", async () => {
   for (const status of [403, 404]) {
     const h = createHarness();
     h.state.resultsStatus = status;
@@ -589,4 +593,102 @@ test("a saved selection survives stopping while logging without overwriting paus
   assert.equal(h.state.history.length, 1);
   assert.equal(h.send("MAJORITY_STATUS").kind, "off");
   assert.equal(h.timers.size, 0);
+});
+
+test("a temporary reporting error must not permanently lock in a random answer", async () => {
+  for (const status of [403, 404]) {
+    const h = createHarness();
+    h.state.resultsStatus = status;
+    enableFallback(h);
+    await h.step();
+    assert.deepEqual(h.state.clicked, ["C"]);
+    h.state.resultsStatus = 200;
+    h.state.votes = { A: 20, B: 70, C: 10 };
+    for (let poll = 0; poll < 4; poll += 1) await h.step();
+    assert.deepEqual(h.state.clicked, ["C", "B"]);
+    assert.deepEqual(h.state.history.map((entry) => entry.source), ["random", "live"]);
+    assert.equal(h.send("MAJORITY_STATUS").liveResults.state, "available");
+  }
+});
+
+test("majority-only mode recovers when a missing live report becomes available", async () => {
+  const h = createHarness();
+  h.state.resultsStatus = 404;
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.equal(h.send("MAJORITY_STATUS").enabled, true);
+  assert.equal(h.send("MAJORITY_STATUS").liveResults.httpStatus, 404);
+  assert.deepEqual(h.state.clicked, []);
+  h.state.resultsStatus = 200;
+  for (let poll = 0; poll < 4; poll += 1) await h.step();
+  assert.deepEqual(h.state.clicked, ["B"]);
+});
+
+test("live-results failures remain visible rather than being hidden by random fallback", async () => {
+  const h = createHarness();
+  h.state.resultsStatus = 403;
+  enableFallback(h);
+  await h.step();
+  const results = h.send("MAJORITY_STATUS").liveResults;
+  assert.equal(results.state, "unavailable");
+  assert.equal(results.httpStatus, 403);
+  assert.equal(results.retryAt, h.state.now + 15000);
+  assert.equal(results.checkedAt, h.state.now);
+  await h.step();
+  assert.equal(h.send("MAJORITY_STATUS").liveResults.checkedAt, results.checkedAt);
+});
+
+test("persistently denied results retry only at the cooldown boundary without duplicate selections", async () => {
+  const h = createHarness();
+  h.state.resultsStatus = 403;
+  enableFallback(h);
+  const requests = () => h.state.requests.filter((request) => request.url.includes("/reporting/")).length;
+  await h.step();
+  await h.step();
+  await h.step();
+  assert.equal(requests(), 1);
+  await h.step();
+  assert.equal(requests(), 2);
+  await h.step();
+  await h.step();
+  assert.equal(requests(), 2);
+  await h.step();
+  assert.equal(requests(), 3);
+  assert.deepEqual(h.state.clicked, ["C"]);
+  assert.equal(h.state.history.length, 1);
+});
+
+test("rate limits after a report retry still enforce a full backoff", async () => {
+  const h = createHarness();
+  h.state.resultsStatus = 404;
+  enableFallback(h);
+  await h.step();
+  h.state.resultsStatus = 429;
+  await h.step();
+  await h.step();
+  await h.step();
+  assert.equal([...h.timers.values()][0].delay, 60000);
+  assert.equal(h.send("MAJORITY_STATUS").liveResults.httpStatus, 429);
+  h.state.resultsStatus = 200;
+  await h.step();
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["C", "B"]);
+});
+
+test("a report cooldown does not delay the next question or select after closure", async () => {
+  for (const closed of [false, true]) {
+    const h = createHarness();
+    h.state.resultsStatus = 403;
+    enableFallback(h);
+    await h.step();
+    h.state.resultsStatus = 200;
+    h.state.selected = "";
+    h.state.question._id = "q2";
+    h.state.question.name = "Question 2";
+    h.state.heading = "Question 2";
+    await h.step();
+    if (closed) h.state.beforeQuestion = () => { h.state.question.ended = "2026-09-25T01:30:10Z"; };
+    await h.step();
+    assert.deepEqual(h.state.clicked, closed ? ["C"] : ["C", "B"]);
+  }
 });

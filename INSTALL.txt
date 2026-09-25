@@ -16,6 +16,8 @@ UPDATING
 Replace your extracted files with the updated ZIP, or use the updated source
 folder. Click Reload for iClicker Majority on chrome://extensions, refresh
 the iClicker tab, and turn on Random fallback if desired before starting.
+Version 1.2.1 fixes a permanent results-error cache that could keep a random
+answer from switching to the live leader after counts became available.
 
 HOW IT WORKS
 Checks the current individual A-E poll every five seconds. The same answer
@@ -23,6 +25,8 @@ must lead in two consecutive readings before it is selected. If a different
 answer becomes the stable leader, the selection changes. A tie keeps your
 existing answer unchanged.
 The leader is the most popular answer (a plurality), not necessarily >50%.
+The popup separately shows whether live counts are readable, the latest
+reporting error (if any), its check time, and the next retry.
 
 RANDOM FALLBACK (OPTIONAL)
 When enabled, missing vote counts, zero responses, or a 403/404 from the
@@ -30,14 +34,17 @@ reporting endpoint trigger a random choice from visible, enabled A-E buttons.
 The same random letter is retained for that question instead of re-rolling
 every five seconds. Existing selections, including manual answers, are kept.
 If readable counts arrive later, the usual two-reading majority rule resumes.
-Denied or missing reporting endpoints are not retried for the same question.
+Reporting 403/404 responses are retried after a 15-second cooldown, not cached
+forever. Majority-only mode also keeps checking instead of stopping on these
+reporting errors. Each retry uses the same signed-in student permissions.
 A random choice is a guess, not a detected majority or correct answer.
 
 The active question must still be identified and verified as open through
 the student API. Random fallback does not bypass sign-in, class access,
 question checks, or disabled buttons. Network failures, rate limits, and
 malformed data do not trigger guesses. With fallback off, unavailable counts
-leave your answer unchanged, and access errors stop the extension as before.
+leave your answer unchanged while reports are rechecked. Authentication and
+non-reporting access errors still stop the extension.
 
 The extension does not log in, join classes, fake attendance, solve questions,
 answer quizzes, or handle multiple-answer, numeric, text, target, or group polls.
@@ -83,7 +90,7 @@ while voting is still open. Some courses/accounts may not provide this.
 Results available only after a poll closes cannot be used to answer it.
 A 401, a 403/404 outside the reporting endpoint, malformed data, or an
 unconfirmed submission stops the extension with an explanation.
-Reporting 403/404 errors also stop it unless Random fallback is enabled.
+Reporting 403/404 errors trigger a 15-second retry cooldown in either mode.
 It does not bypass access restrictions.
 If the live-data prerequisite is not met, this cannot perform majority voting.
 No algorithm can infer an actual class majority from hidden vote counts.

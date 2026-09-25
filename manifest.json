@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "iClicker Majority",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Follows live A-E votes, offers a random fallback, and keeps a local history of each automatic selection.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "storage"],

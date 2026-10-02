@@ -12,7 +12,7 @@ function validateSelection(selection, sender) {
       !IClickerMajority.id(selection.activityId) || !IClickerMajority.id(selection.questionId) ||
       typeof selection.questionName !== "string" || !selection.questionName.trim() ||
       selection.questionName.length > 200 || !/^[A-E]$/.test(selection.answer) ||
-      !["random", "live"].includes(selection.source)) {
+      !["random", "live", "ai"].includes(selection.source)) {
     throw new Error("The answer-history entry is invalid.");
   }
   if (!sender.tab || !sender.url ||

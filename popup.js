@@ -2,6 +2,10 @@
 
 const toggle = document.getElementById("toggle");
 const randomFallback = document.getElementById("random-fallback");
+const aiFallback = document.getElementById("ai-fallback");
+const aiStatus = document.getElementById("ai-status");
+const backgroundStatus = document.getElementById("background-status");
+const aiSetup = document.getElementById("ai-setup");
 const message = document.getElementById("message");
 const liveStatus = document.getElementById("live-status");
 const majorityIndicator = document.getElementById("majority-indicator");
@@ -20,11 +24,14 @@ let busy = false;
 let refreshTimer;
 let commandVersion = 0;
 let historyVersion = 0;
+let monitoringBackground = false;
 
 function renderHistory(entries) {
   const randomCount = entries.filter((entry) => entry.source === "random").length;
+  const aiCount = entries.filter((entry) => entry.source === "ai").length;
+  const liveCount = entries.filter((entry) => entry.source === "live").length;
   historySummary.textContent = entries.length
-    ? `${randomCount} random / ${entries.length - randomCount} live-vote selections`
+    ? `${randomCount} random / ${aiCount} AI / ${liveCount} live-vote selections`
     : "No automatic selections recorded yet.";
   historyList.replaceChildren();
   for (const entry of entries) {
@@ -37,7 +44,7 @@ function renderHistory(entries) {
     const source = document.createElement("span");
     source.className = "source-badge";
     source.dataset.source = entry.source;
-    source.textContent = entry.source === "random" ? "Random" : "Live votes";
+    source.textContent = { random: "Random", ai: "Local AI", live: "Live votes" }[entry.source] || "Unknown";
     top.append(title, source);
     const meta = document.createElement("div");
     meta.className = "history-meta";
@@ -95,6 +102,11 @@ function render(status) {
   toggle.disabled = busy;
   randomFallback.checked = status.randomFallback === true;
   randomFallback.disabled = busy;
+  aiFallback.checked = status.aiFallback === true;
+  aiFallback.disabled = busy;
+  aiStatus.textContent = status.aiStatus || "AI fallback is off.";
+  backgroundStatus.textContent = (monitoringBackground ? "Monitoring your iClicker tab in the background. " : "") +
+    (status.schedulerStatus || "Paused.");
   state.textContent = enabled ? "Running" : status.kind === "error" ? "Stopped" : "Paused";
   state.dataset.kind = status.kind;
   message.textContent = status.message;
@@ -132,6 +144,9 @@ function fail(text) {
   clearTimeout(refreshTimer);
   toggle.disabled = true;
   randomFallback.disabled = true;
+  aiFallback.disabled = true;
+  aiStatus.textContent = "";
+  backgroundStatus.textContent = "";
   state.textContent = "Not connected";
   state.dataset.kind = "error";
   message.textContent = text;
@@ -165,6 +180,7 @@ async function command(payload) {
   commandVersion += 1;
   toggle.disabled = true;
   randomFallback.disabled = true;
+  aiFallback.disabled = true;
   try {
     const result = await chrome.tabs.sendMessage(tabId, payload);
     busy = false;
@@ -183,14 +199,41 @@ randomFallback.addEventListener("change", () => {
   command({ type: "MAJORITY_OPTIONS", randomFallback: randomFallback.checked });
 });
 
+aiFallback.addEventListener("change", () => {
+  command({ type: "MAJORITY_OPTIONS", aiFallback: aiFallback.checked });
+});
+
+aiSetup.addEventListener("click", async () => {
+  try {
+    const url = chrome.runtime.getURL("ai.html");
+    const tabs = await chrome.tabs.query({ url });
+    if (tabs.length) {
+      await chrome.tabs.update(tabs[0].id, { active: true });
+    } else {
+      await chrome.tabs.create({ url });
+    }
+  } catch (error) {
+    aiStatus.textContent = `Could not open local AI setup: ${error.message}`;
+  }
+});
+
 async function init() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url || new URL(tab.url).origin !== "https://student.iclicker.com") {
-      fail("Open student.iclicker.com, sign in, and open this extension from that tab.");
-      return;
+      const running = await chrome.runtime.sendMessage({ type: "POLL_RUNNING" });
+      if (!running?.ok) throw new Error(running?.error || "Could not locate running polls.");
+      if (running.tabIds.length !== 1) {
+        fail(running.tabIds.length > 1
+          ? "Several iClicker tabs are running. Open the one you want to control, then reopen this popup."
+          : "Open student.iclicker.com, sign in, and open this extension from that tab.");
+        return;
+      }
+      tabId = running.tabIds[0];
+      monitoringBackground = true;
+    } else {
+      tabId = tab.id;
     }
-    tabId = tab.id;
     await refresh();
   } catch (error) {
     fail("Chrome could not connect to this tab. Reopen the extension on iClicker.");

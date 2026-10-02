@@ -4,14 +4,19 @@
   if (globalThis.__iclickerMajorityLoaded) return;
   globalThis.__iclickerMajorityLoaded = true;
   const Core = globalThis.IClickerMajority;
-  const API = "https://api.iclicker.com";
   const INTERVAL = 5000;
   const REPORT_RETRY = 15000;
   const stability = new Core.Stability();
   const randomAnswers = new Map();
   const unavailableReports = new Map();
+  const aiAnswers = new Map();
+  const automaticAnswers = new Map();
   let enabled = false;
   let randomFallback = false;
+  let aiFallback = false;
+  let aiStatus = "AI fallback is off.";
+  let schedulerStatus = "Paused.";
+  let schedulerQueue = Promise.resolve();
   let timer = null;
   let pending = null;
   let generation = 0;
@@ -42,7 +47,87 @@
   }
 
   function publish(kind, message, extra = {}) {
-    status = { enabled, randomFallback, liveResults, kind, message, rows: [], ...extra };
+    status = { enabled, randomFallback, aiFallback, aiStatus, schedulerStatus, liveResults, kind, message, rows: [], ...extra };
+  }
+
+  function updateScheduler(delay) {
+    const state = { type: "POLL_SCHEDULE", enabled, delay };
+    const epoch = generation;
+    schedulerQueue = schedulerQueue.then(async () => {
+      try {
+        const result = await chrome.runtime.sendMessage(state);
+        if (!result?.ok) throw new Error(result?.error || "No background scheduler response.");
+        if (epoch === generation) {
+          schedulerStatus = enabled ? "Background polling active; tab switching is supported." : "Paused.";
+          status = { ...status, schedulerStatus };
+        }
+      } catch (error) {
+        if (epoch !== generation) return;
+        enabled = false;
+        clearTimeout(timer);
+        pending?.abort();
+        schedulerStatus = `Background polling failed: ${error.message}`;
+        publish("error", schedulerStatus);
+      }
+    });
+  }
+
+  function questionInput(view) {
+    const text = [...view.root.querySelectorAll("app-text-recognition p")]
+      .map((element) => element.textContent.trim()).filter(Boolean).join("\n").slice(0, 16000);
+    const image = [...view.root.querySelectorAll(".question-image-container img")]
+      .find((element) => element.complete && element.naturalWidth > 100 &&
+        !element.classList.contains("hidden-by-instructor") &&
+        !/image_hidden|placeholder|ajax-loader/i.test(element.src));
+    let data = null;
+    let reason = "";
+    if (image) {
+      try {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+        canvas.width = Math.round(image.naturalWidth * scale);
+        canvas.height = Math.round(image.naturalHeight * scale);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Image conversion is unavailable.");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        data = canvas.toDataURL("image/jpeg", 0.85);
+        if (data.length > 3000000) {
+          data = null;
+          reason = "Question image exceeds the local AI size limit.";
+        }
+      } catch (error) {
+        if (error.name !== "SecurityError") throw error;
+        reason = "The question image cannot be read because of its cross-origin restrictions.";
+      }
+    }
+    return { input: { text, image: data, choices: [...view.buttons.keys()] }, reason };
+  }
+
+  async function chooseAI(questionKey, view) {
+    const { input, reason } = questionInput(view);
+    if (!input.text && !input.image) {
+      aiStatus = reason || "No readable question text or image is available for AI.";
+      return null;
+    }
+    const fingerprint = JSON.stringify(input);
+    const cached = aiAnswers.get(questionKey);
+    if (cached?.fingerprint === fingerprint && (cached.answer || Date.now() < cached.retryAt)) {
+      aiStatus = cached.message;
+      return cached.answer;
+    }
+    aiStatus = "Local AI is considering the readable question...";
+    publish("thinking", aiStatus, { question: view.heading });
+    let response;
+    try {
+      response = await chrome.runtime.sendMessage({ type: "AI_ANSWER", input });
+    } catch (error) {
+      response = { ok: false, error: `Local AI connection failed: ${error.message}` };
+    }
+    const answer = response?.ok && input.choices.includes(response.answer) ? response.answer : null;
+    aiStatus = answer ? `Local AI suggests ${answer}.` : response?.error || "AI did not produce a valid answer.";
+    aiAnswers.set(questionKey, { fingerprint, answer, message: aiStatus, retryAt: Date.now() + 30000 });
+    if (aiAnswers.size > 200) aiAnswers.delete(aiAnswers.keys().next().value);
+    return answer;
   }
 
   function getView() {
@@ -87,21 +172,18 @@
     if (!token) throw new RequestError("Sign in to iClicker, then start again.", true);
     let response;
     try {
-      response = await fetch(`${API}${path}`, {
-        method: "GET",
-        credentials: "omit",
-        cache: "no-store",
-        redirect: "error",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-          "Reef-Auth-Type": "oauth"
-        },
-        signal
-      });
+      const result = await chrome.runtime.sendMessage({ type: "STUDENT_GET", path, token });
+      if (signal.aborted) throw new Error("Request was cancelled.");
+      if (!result?.ok) throw new Error(result?.error || "No student API response.");
+      response = {
+        status: result.status,
+        ok: result.status >= 200 && result.status < 300,
+        headers: { get: () => result.retryAfter },
+        json: async () => result.data
+      };
     } catch (error) {
       if (signal.aborted) throw error;
-      throw new RequestError("The iClicker API could not be reached (network or CORS). No answer was selected.", false, 15000);
+      throw new RequestError(`The student API request failed: ${error.message}`, false, 15000);
     }
     if (response.status === 401 || response.status === 403) {
       throw new RequestError(
@@ -141,22 +223,28 @@
     pending?.abort();
     stability.reset();
     liveResults = null;
+    updateScheduler(0);
     if (!preserveAttempt) lastAttempt = null;
   }
 
   function schedule(delay = INTERVAL) {
     clearTimeout(timer);
     if (enabled) timer = setTimeout(tick, delay);
+    updateScheduler(delay);
   }
 
   async function tick() {
     if (!enabled || running) return;
+    if (location.href !== route) {
+      route = location.href;
+      resetWork();
+    }
     running = true;
     const epoch = generation;
     const url = location.href;
     const controller = new AbortController();
     pending = controller;
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), 40000);
     let delay = INTERVAL;
     const current = () => enabled && epoch === generation && location.href === url;
     try {
@@ -228,7 +316,10 @@
         }
       } catch (error) {
         if (!current() || !sameView(view)) return;
-        if (!(error instanceof RequestError) || ![403, 404].includes(error.httpStatus)) {
+        const recoverableReportError = (error instanceof Core.DataError && aiFallback) || (error instanceof RequestError &&
+          ![401, 429].includes(error.httpStatus) &&
+          ([403, 404].includes(error.httpStatus) || (!error.permanent && (aiFallback || randomFallback))));
+        if (!recoverableReportError) {
           liveResults = {
             state: "error", httpStatus: error.httpStatus || null,
             checkedAt: Date.now(), retryAt: null,
@@ -240,20 +331,21 @@
         // Missing reports can become readable during the same question; never cache them forever.
         liveResults = {
           state: "unavailable",
-          httpStatus: error.httpStatus,
+          httpStatus: error.httpStatus || null,
           checkedAt: Date.now(),
           retryAt: Date.now() + REPORT_RETRY,
           message: error.httpStatus === 403
             ? "iClicker denied access to live results (HTTP 403)."
-            : "The live report is not available yet (HTTP 404)."
+            : error.httpStatus === 404 ? "The live report is not available yet (HTTP 404)."
+            : `Live report unavailable: ${error.message}`
         };
         unavailableReports.set(questionKey, liveResults);
         result = { kind: "unavailable", rows: [] };
       }
       if (!current() || !sameView(view)) return;
       const extra = { rows: result.rows, question: questionName };
-      const useRandom = randomFallback && ["unavailable", "empty"].includes(result.kind);
-      if (result.kind !== "leader" && !useRandom) {
+      const noLeader = result.kind !== "leader";
+      if (noLeader && !aiFallback && (!randomFallback || result.kind === "tie")) {
         stability.reset();
         const messages = {
           unavailable: "Live vote counts are unavailable. Continuing to check; no answer has been changed.",
@@ -264,12 +356,27 @@
         return;
       }
       let answer = result.answer;
-      if (useRandom) {
+      let source = "live";
+      if (noLeader) {
         stability.reset();
         const selected = [...view.buttons].find(([, button]) => isSelected(button));
-        if (selected) {
+        const previous = automaticAnswers.get(questionKey);
+        const canUpgradeRandom = selected && previous?.source === "random" && previous.answer === selected[0];
+        if (selected && (!aiFallback || !canUpgradeRandom)) {
           lastAttempt = null;
-          publish("random", `Live votes unavailable. Keeping your selected answer ${selected[0]}.`, extra);
+          publish(previous?.source || "selected", `No live leader. Keeping your selected answer ${selected[0]}.`, extra);
+          return;
+        }
+        answer = aiFallback ? await chooseAI(questionKey, view) : null;
+        if (!current() || !sameView(view)) return;
+        if (controller.signal.aborted) throw new Error("Question processing timed out.");
+        source = "ai";
+        if (!answer && selected) {
+          publish("random", `No live leader. Keeping random answer ${selected[0]}. ${aiStatus}`, extra);
+          return;
+        }
+        if (!answer && !randomFallback) {
+          publish("unavailable", `No live leader or AI answer. ${aiStatus}`, extra);
           return;
         }
         const choices = [...view.buttons].filter(([, button]) => isEnabled(button)).map(([letter]) => letter);
@@ -277,10 +384,13 @@
           publish("waiting", "The answer buttons are disabled. Waiting for iClicker.");
           return;
         }
-        if (!randomAnswers.has(questionKey)) {
-          randomAnswers.set(questionKey, choices[Math.floor(Math.random() * choices.length)]);
+        if (!answer) {
+          source = "random";
+          if (!randomAnswers.has(questionKey)) {
+            randomAnswers.set(questionKey, choices[Math.floor(Math.random() * choices.length)]);
+          }
+          answer = randomAnswers.get(questionKey);
         }
-        answer = randomAnswers.get(questionKey);
       }
       const button = view.buttons.get(answer);
       if (!button) {
@@ -289,10 +399,11 @@
       if (isSelected(button)) {
         stability.reset();
         lastAttempt = null;
-        publish("selected", `${answer} is selected and leads with ${result.percentage}%.`, extra);
+        publish("selected", source === "live" ? `${answer} is selected and leads with ${result.percentage}%.`
+          : `${answer} is already selected (${source === "ai" ? "AI recommendation" : "random fallback"}).`, extra);
         return;
       }
-      if (!useRandom && !stability.observe(questionKey, answer)) {
+      if (source === "live" && !stability.observe(questionKey, answer)) {
         publish("observing", `${answer} leads with ${result.percentage}%. Confirming on the next update.`, extra);
         return;
       }
@@ -319,19 +430,20 @@
       }
       lastAttempt = attempt;
       button.click();
+      automaticAnswers.set(questionKey, { source, answer });
       await recordSelection({
         courseId,
         activityId: question.activityId,
         questionId: question.questionId,
         questionName,
         answer,
-        source: useRandom ? "random" : "live",
-        percentage: useRandom ? null : result.percentage
+        source,
+        percentage: source === "live" ? result.percentage : null
       });
       if (!current()) return;
-      publish("sending", useRandom
-        ? `Selected ${answer} randomly because live votes are unavailable. Waiting for iClicker to confirm.`
-        : `Selected ${answer} (${result.percentage}%). Waiting for iClicker to confirm.`, extra);
+      publish("sending", source === "live"
+        ? `Selected ${answer} (${result.percentage}%). Waiting for iClicker to confirm.`
+        : `Selected ${answer} ${source === "ai" ? "using local AI" : "randomly"} because no live leader was available. Waiting for iClicker to confirm.`, extra);
     } catch (error) {
       if (error instanceof HistoryError) {
         enabled = false;
@@ -361,6 +473,12 @@
     if (sender.id !== chrome.runtime.id) return;
     if (message?.type === "MAJORITY_STATUS") {
       sendResponse(status);
+    } else if (message?.type === "MAJORITY_TICK") {
+      sendResponse({ enabled });
+      if (enabled) {
+        clearTimeout(timer);
+        tick();
+      }
     } else if (message?.type === "MAJORITY_START") {
       if (!enabled) {
         resetWork();
@@ -375,12 +493,18 @@
       publish("off", "Paused. Nothing will be selected.");
       sendResponse(status);
     } else if (message?.type === "MAJORITY_OPTIONS") {
-      if (typeof message.randomFallback !== "boolean") {
+      if ((message.randomFallback !== undefined && typeof message.randomFallback !== "boolean") ||
+          (message.aiFallback !== undefined && typeof message.aiFallback !== "boolean") ||
+          (message.randomFallback === undefined && message.aiFallback === undefined)) {
         sendResponse({ ...status, kind: "error", message: "Invalid random-fallback setting." });
         return;
       }
-      if (randomFallback !== message.randomFallback) {
-        randomFallback = message.randomFallback;
+      const nextRandom = message.randomFallback ?? randomFallback;
+      const nextAI = message.aiFallback ?? aiFallback;
+      if (randomFallback !== nextRandom || aiFallback !== nextAI) {
+        randomFallback = nextRandom;
+        aiFallback = nextAI;
+        aiStatus = aiFallback ? "Local AI will run when no live leader is readable." : "AI fallback is off.";
         resetWork(true);
         publish(enabled ? "waiting" : "off", enabled
           ? "Settings updated. Checking the current poll."

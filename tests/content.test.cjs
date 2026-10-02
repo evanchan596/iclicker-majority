@@ -34,6 +34,12 @@ function createHarness() {
     randomCalls: 0,
     confirmClick: true,
     token: "test-token",
+    aiResult: { ok: true, answer: "D" },
+    aiRequests: [],
+    text: "Which number is even? A: 1 B: 3 C: 5 D: 6 E: 7",
+    beforeAI: null,
+    schedulerRequests: [],
+    schedulerError: null,
     question: {
       _id: "q1", activityId: "a1", name: "Question 1",
       answerType: "SINGLE_ANSWER", ended: null
@@ -57,7 +63,8 @@ function createHarness() {
     getClientRects: () => [1],
     closest: () => ({ querySelector: () => ({ textContent: state.heading }) }),
     querySelector: () => null,
-    querySelectorAll: (selector) => selector.includes("button") ? buttons : []
+    querySelectorAll: (selector) => selector.includes("button") ? buttons
+      : selector === "app-text-recognition p" ? [{ textContent: state.text }] : []
   };
   const context = {
     IClickerMajority: Core,
@@ -77,6 +84,21 @@ function createHarness() {
         id: "test-extension",
         onMessage: { addListener: (callback) => { listener = callback; } },
         sendMessage: async (message) => {
+          if (message.type === "POLL_SCHEDULE") {
+            state.schedulerRequests.push(message);
+            return state.schedulerError ? { ok: false, error: state.schedulerError } : { ok: true };
+          }
+          if (message.type === "AI_ANSWER") {
+            state.aiRequests.push(message.input);
+            await state.beforeAI?.();
+            return state.aiResult;
+          }
+          if (message.type === "STUDENT_GET") {
+            const result = await context.fetch(`https://api.iclicker.com${message.path}`, {
+              method: "GET", redirect: "error", headers: { Authorization: `Bearer ${message.token}` }
+            });
+            return { ok: true, status: result.status, retryAfter: result.headers.get("Retry-After"), data: await result.json() };
+          }
           assert.equal(message.type, "HISTORY_ADD");
           await state.beforeHistory?.();
           if (state.historyError) return { ok: false, error: state.historyError };
@@ -136,7 +158,7 @@ function createHarness() {
     return result;
   }
   async function step() {
-    const entry = [...timers].find(([, item]) => item.delay !== 12000);
+    const entry = [...timers].find(([, item]) => item.delay !== 40000);
     assert.ok(entry, "a polling timer should be scheduled");
     timers.delete(entry[0]);
     state.now += entry[1].delay;
@@ -454,8 +476,8 @@ test("sign-in and non-reporting access failures never trigger random submission"
   }
 });
 
-test("fallback does not guess after rate limiting, network/server failures, or malformed data", async () => {
-  for (const kind of ["rate-limit", "server", "network", "malformed"]) {
+test("fallback does not guess after rate limiting or malformed data", async () => {
+  for (const kind of ["rate-limit", "malformed"]) {
     const h = createHarness();
     if (kind === "rate-limit") h.state.resultsStatus = 429;
     if (kind === "server") h.state.resultsStatus = 503;
@@ -467,6 +489,160 @@ test("fallback does not guess after rate limiting, network/server failures, or m
     assert.equal(h.state.randomCalls, 0);
     if (kind === "rate-limit") assert.equal([...h.timers.values()][0].delay, 60000);
   }
+});
+
+test("unavailable reports use AI before random and record the AI source", async () => {
+  const h = createHarness();
+  h.state.votes = {};
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["D"]);
+  assert.equal(h.state.history[0].source, "ai");
+  assert.equal(h.state.history[0].percentage, null);
+  assert.equal(h.state.randomCalls, 0);
+  await h.step();
+  assert.equal(h.state.aiRequests.length, 1);
+  assert.deepEqual(h.state.clicked, ["D"]);
+});
+
+test("a visible majority takes precedence over AI", async () => {
+  const h = createHarness();
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["B"]);
+  assert.equal(h.state.aiRequests.length, 0);
+  assert.equal(h.state.history[0].source, "live");
+});
+
+test("missing question content never gets sent to AI and falls back randomly", async () => {
+  const h = createHarness();
+  h.state.votes = {};
+  h.state.text = "";
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.equal(h.state.aiRequests.length, 0);
+  assert.deepEqual(h.state.clicked, ["C"]);
+  assert.match(h.send("MAJORITY_STATUS").aiStatus, /No readable question/);
+});
+
+test("an unavailable model or invalid AI letter uses the random fallback", async () => {
+  for (const aiResult of [{ ok: false, error: "AI not ready" }, { ok: true, answer: "Z" }]) {
+    const h = createHarness();
+    h.state.votes = {};
+    h.state.aiResult = aiResult;
+    h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+    h.send("MAJORITY_START");
+    await h.step();
+    assert.deepEqual(h.state.clicked, ["C"]);
+    assert.equal(h.state.history[0].source, "random");
+  }
+});
+
+test("AI failure without random fallback leaves the question unanswered", async () => {
+  const h = createHarness();
+  h.state.votes = {};
+  h.state.aiResult = { ok: false, error: "AI not ready" };
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.deepEqual(h.state.clicked, []);
+  assert.match(h.send("MAJORITY_STATUS").message, /AI not ready/);
+});
+
+test("new readable majority replaces an AI answer after two readings", async () => {
+  const h = createHarness();
+  h.state.votes = {};
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  h.state.votes = { B: 100 };
+  await h.step();
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["D", "B"]);
+  assert.deepEqual(h.state.history.map((entry) => entry.source), ["ai", "live"]);
+});
+
+test("a late AI answer upgrades only the extension's own random pick", async () => {
+  const h = createHarness();
+  h.state.votes = {};
+  h.state.aiResult = { ok: false, error: "Model is starting" };
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  h.state.aiResult = { ok: true, answer: "D" };
+  for (let poll = 0; poll < 6; poll += 1) await h.step();
+  assert.deepEqual(h.state.clicked, ["C", "D"]);
+  h.state.selected = "A";
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["C", "D"]);
+});
+
+test("stopping, switching question, or closing a poll during inference prevents AI submission", async () => {
+  for (const event of ["stop", "question", "closed", "disabled"]) {
+    const h = createHarness();
+    h.state.votes = {};
+    h.state.beforeAI = () => {
+      if (event === "stop") h.send("MAJORITY_STOP");
+      if (event === "question") { h.state.heading = "Question 2"; h.state.question._id = "q2"; }
+      if (event === "closed") h.state.question.ended = "2026-10-02T20:00:00Z";
+      if (event === "disabled") h.state.enabledControls = false;
+    };
+    h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+    h.send("MAJORITY_START");
+    await h.step();
+    assert.deepEqual(h.state.clicked, []);
+  }
+});
+
+test("a worker wake drives a selection with page poll timers removed", async () => {
+  const h = createHarness();
+  h.send("MAJORITY_START");
+  h.timers.clear();
+  assert.equal(h.send("MAJORITY_TICK").enabled, true);
+  for (let count = 0; count < 50; count += 1) await Promise.resolve();
+  assert.equal(h.send("MAJORITY_STATUS").kind, "observing");
+  h.timers.clear();
+  h.send("MAJORITY_TICK");
+  for (let count = 0; count < 50; count += 1) await Promise.resolve();
+  assert.deepEqual(h.state.clicked, ["B"]);
+  assert.match(h.send("MAJORITY_STATUS").schedulerStatus, /Background polling active/);
+  h.send("MAJORITY_STOP");
+  for (let count = 0; count < 50; count += 1) await Promise.resolve();
+  assert.equal(h.state.schedulerRequests.at(-1).enabled, false);
+});
+
+test("background scheduling failures pause with an explicit error", async () => {
+  const h = createHarness();
+  h.state.schedulerError = "Permission unavailable";
+  h.send("MAJORITY_START");
+  for (let count = 0; count < 50; count += 1) await Promise.resolve();
+  assert.equal(h.send("MAJORITY_STATUS").enabled, false);
+  assert.match(h.send("MAJORITY_STATUS").message, /Background polling failed/);
+});
+
+test("report-only network failures can fall back without bypassing question access", async () => {
+  const h = createHarness();
+  h.state.beforeResults = () => { throw new TypeError("Report network failure"); };
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["D"]);
+  assert.equal(h.send("MAJORITY_STATUS").liveResults.state, "unavailable");
+});
+
+test("AI mode treats malformed report data as unavailable, never as a majority", async () => {
+  const h = createHarness();
+  h.state.votes = { A: 20, B: 10 };
+  h.send({ type: "MAJORITY_OPTIONS", aiFallback: true, randomFallback: true });
+  h.send("MAJORITY_START");
+  await h.step();
+  assert.deepEqual(h.state.clicked, ["D"]);
+  assert.equal(h.state.history[0].source, "ai");
+  assert.equal(h.send("MAJORITY_STATUS").liveResults.state, "unavailable");
 });
 
 test("an unconfirmed random click pauses without re-rolling or resubmitting", async () => {

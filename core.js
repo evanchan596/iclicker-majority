@@ -120,7 +120,7 @@
       return { state: "unknown", label: "Not connected", detail: "Open the extension on an iClicker tab to check." };
     }
     if (results?.state === "unavailable" || results?.state === "error") {
-      return { state: "no", label: "No", detail: "Live counts cannot be read. Random picks are not majority votes." };
+      return { state: "no", label: "No", detail: "Live counts cannot be read. AI and random picks are not majority votes." };
     }
     if (status.kind === "error") {
       return { state: "unknown", label: "Unknown", detail: "The current majority cannot be confirmed. See the error below." };
@@ -149,7 +149,25 @@
     return { state: "unknown", label: "Unknown", detail: "The live response does not identify a readable majority." };
   }
 
-  const api = { DataError, id, courseFromUrl, activeQuestion, leadingAnswer, Stability, majorityVisibility };
+  function aiInput(input) {
+    if (!input || typeof input.text !== "string" || input.text.length > 16000 ||
+        !Array.isArray(input.choices) || input.choices.length < 2 || input.choices.length > 5 ||
+        input.choices.some((letter) => !/^[A-E]$/.test(letter)) ||
+        new Set(input.choices).size !== input.choices.length ||
+        (input.image !== null && (typeof input.image !== "string" || input.image.length > 3000000 ||
+          !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(input.image)))) {
+      throw new DataError("Invalid local AI question input.");
+    }
+    return { text: input.text.trim(), choices: [...input.choices], image: input.image };
+  }
+
+  function parseAIAnswer(output, choices) {
+    let result;
+    try { result = JSON.parse(output); } catch { return null; }
+    return result && typeof result.answer === "string" && choices.includes(result.answer) ? result.answer : null;
+  }
+
+  const api = { DataError, id, courseFromUrl, activeQuestion, leadingAnswer, Stability, majorityVisibility, aiInput, parseAIAnswer };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.IClickerMajority = Object.freeze(api);
 })(globalThis);

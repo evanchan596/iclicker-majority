@@ -147,3 +147,19 @@ test("a readable report without a valid leader never yields a misleading yes", (
     }, now).label, "Unknown");
   }
 });
+
+test("local AI input permits only bounded text and inline image data", () => {
+  const input = { text: "Question: A or B?", image: null, choices: ["A", "B"] };
+  assert.deepEqual(Core.aiInput(input), input);
+  for (const change of [
+    { text: "x".repeat(16001) }, { image: "https://evil.example/image.png" },
+    { image: "data:text/html;base64,PHNjcmlwdD4=" }, { choices: ["A", "A"] }, { choices: ["Z", "B"] }
+  ]) assert.throws(() => Core.aiInput({ ...input, ...change }), Core.DataError);
+});
+
+test("AI output must be a structured, allowed letter, not arbitrary prose", () => {
+  assert.equal(Core.parseAIAnswer('{"answer":"B"}', ["A", "B"]), "B");
+  for (const output of ['{"answer":null}', '{"answer":"Z"}', "B", "I think B", '{"answer":true}', "null"]) {
+    assert.equal(Core.parseAIAnswer(output, ["A", "B"]), null);
+  }
+});

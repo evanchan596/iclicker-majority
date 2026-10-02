@@ -137,3 +137,6 @@ button.secondary:hover { background: var(--cp-surface); }
 .notice { font-size: 12px; color: var(--cp-text-muted); margin: 16px 0 0; }
 .privacy { border-top: 1px solid var(--cp-border); padding-top: 12px; }
 a { color: var(--cp-link); }
+.setup-page { width: min(100%, 680px); margin: 32px auto; }
+.source-badge[data-source="ai"] { border-color: var(--cp-link); }
+#ai-setup { margin-top: 8px; }

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iClicker Majority - Local AI</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="theme.css">
+  <script src="core.js" defer></script>
+  <script src="ai.js" defer></script>
+</head>
+<body class="setup-page">
+  <main class="card">
+    <h1>Local AI setup</h1>
+    <p>Uses Chrome's built-in model on this computer. Question text and readable images stay on-device. No API key or external AI service is used.</p>
+    <p>Chrome may download a large model and requires supported desktop hardware. Click below to prepare it, then keep this tab open; you can switch to any other tab.</p>
+    <button id="prepare-ai" type="button">Prepare local AI</button>
+    <p id="ai-engine-status" role="status" aria-live="polite">Not initialized.</p>
+    <p class="notice">In the extension popup, enable AI fallback and Random fallback for the full live leader &gt; AI &gt; random sequence. AI can be wrong. This tab does not start answering until you start the extension on iClicker.</p>
+  </main>
+</body>
+</html>

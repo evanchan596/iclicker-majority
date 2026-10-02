@@ -26,14 +26,22 @@
       </div>
       <p id="message" role="status" aria-live="polite">Connecting to iClicker...</p>
       <p id="live-status" class="option-detail" hidden></p>
+      <p id="background-status" class="option-detail"></p>
+      <p id="ai-status" class="option-detail"></p>
       <p id="question" hidden></p>
       <div id="votes" aria-label="Class response distribution"></div>
     </section>
     <label class="option">
+      <input id="ai-fallback" type="checkbox" disabled>
+      <span>Local AI fallback</span>
+    </label>
+    <p class="option-detail">If no live leader is readable, ask Chrome's on-device model. Requires setup; AI answers may be wrong. No question data is sent to an AI server.</p>
+    <button id="ai-setup" class="secondary" type="button">Open AI setup</button>
+    <label class="option">
       <input id="random-fallback" type="checkbox" aria-describedby="fallback-description" disabled>
       <span>Random fallback</span>
     </label>
-    <p id="fallback-description" class="option-detail">When live votes are unavailable, pick one random enabled letter per unanswered question. Keep existing answers; follow a stable leader if counts become available. Off by default.</p>
+    <p id="fallback-description" class="option-detail">If neither a live leader nor an enabled AI answer is available, choose one random letter. Enable both fallbacks for live leader &gt; AI &gt; random. Preserve manual answers; upgrade the extension's random pick if an AI answer arrives later.</p>
     <button id="toggle" type="button" disabled>Start auto-select</button>
     <section class="history-panel" aria-labelledby="history-title">
       <div class="history-heading">
@@ -45,9 +53,9 @@
       <ol id="history-list" aria-label="Automatic selections, newest first"></ol>
       <p class="option-detail">Last 200 automatic selections, saved only in this browser. These are selection attempts, not submission receipts. Manual answers are not logged.</p>
     </section>
-    <p class="notice"><strong>Starting allows automatic answer submissions.</strong> While this tab stays open, the extension checks every 5 seconds and follows a leader after two readings. Ties keep your answer unchanged.</p>
+    <p class="notice"><strong>Starting allows automatic answer submissions.</strong> Background polling targets 5-second updates even when you switch tabs, with a 30-second recovery alarm. Keep Chrome and the iClicker tab open. Sleep, forced freezing, or browser shutdown can interrupt it. Refreshing the tab pauses automation.</p>
     <p class="notice">Majority selection requires live class results. Random fallback does not reveal hidden votes or find the correct answer. Most popular does not mean correct.</p>
-    <p class="notice privacy">Local history only; no analytics or third-party servers. Use only where your course permits automation. <a href="https://student.iclicker.com" target="_blank" rel="noopener noreferrer">Open iClicker</a></p>
+    <p class="notice privacy">Local history and on-device AI; no analytics or external AI servers. This does not hide tab switches from iClicker. Use only where your course permits automation. <a href="https://student.iclicker.com" target="_blank" rel="noopener noreferrer">Open iClicker</a></p>
   </main>
 </body>
 </html>

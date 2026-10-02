@@ -80,6 +80,13 @@ test("random records never claim a live-vote percentage", async () => {
   assert.equal(h.store.answerHistory[0].percentage, null);
 });
 
+test("AI records stay distinguishable from live votes and random guesses", async () => {
+  const h = createHarness();
+  await h.send({ type: "HISTORY_ADD", selection: { ...selection, source: "ai" } });
+  assert.equal(h.store.answerHistory[0].source, "ai");
+  assert.equal(h.store.answerHistory[0].percentage, null);
+});
+
 test("concurrent tabs retain both picks instead of overwriting one another", async () => {
   const h = createHarness();
   const results = await Promise.all([

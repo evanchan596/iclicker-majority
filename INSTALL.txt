@@ -1,136 +1,146 @@
-iClicker Majority - Chrome extension
+iClicker Majority 2.0.0 - Chrome extension
 
-INSTALL
-1. If using the ZIP, extract it first.
-2. Open chrome://extensions in Chrome.
-3. Turn on Developer mode.
-4. Click Load unpacked and choose the folder containing manifest.json.
-5. Refresh any already-open student.iclicker.com tab.
-6. Sign in normally, join your class, and open the extension popup.
-7. Optionally turn on Random fallback to choose a random letter when live
-   vote counts are unavailable. It is off by default.
-8. Click Start auto-select. This authorizes automatic answer submissions
-   through iClicker's normal answer buttons for this tab.
+INSTALL OR UPDATE
+1. Extract the ZIP into a folder. Do not load the ZIP itself.
+2. Open chrome://extensions and turn on Developer mode.
+3. Choose Load unpacked and select the folder containing manifest.json.
+   For an existing install, replace its files and click Reload instead.
+4. Accept the extension's iClicker site access. Version 2 adds access to
+   api.iclicker.com and alarms for background polling.
+5. Refresh your iClicker tab, sign in normally, and join the class yourself.
+6. For the full fallback chain, prepare Local AI as described below, then
+   enable BOTH Local AI fallback and Random fallback in the popup.
+7. Click Start auto-select. This permits automatic answer submissions for
+   that tab. You can switch tabs and close the popup without stopping it.
 
-UPDATING
-Replace your extracted files with the updated ZIP, or use the updated source
-folder. Click Reload for iClicker Majority on chrome://extensions, refresh
-the iClicker tab, and turn on Random fallback if desired before starting.
-Version 1.2.1 fixes a permanent results-error cache that could keep a random
-answer from switching to the live leader after counts became available.
-Version 1.3.0 adds a prominent Majority vote visible indicator to the popup.
+ANSWER ORDER
+1. LIVE VOTES: read the student reporting API for the exact open question.
+   Follow a single leading A-E answer after two consecutive readings.
+   "Majority" means the most popular answer, even below 50%.
+2. LOCAL AI (if enabled): if a live leader is unavailable or tied, use the
+   readable question text/image to ask Chrome's on-device model.
+3. RANDOM (if enabled): if there is no usable AI answer, or no readable
+   question, select one random enabled letter, not a new letter each tick.
 
-HOW IT WORKS
-Checks the current individual A-E poll every five seconds. The same answer
-must lead in two consecutive readings before it is selected. If a different
-answer becomes the stable leader, the selection changes. A tie keeps your
-existing answer unchanged.
-The leader is the most popular answer (a plurality), not necessarily >50%.
-The popup separately shows whether live counts are readable, the latest
-reporting error (if any), its check time, and the next retry.
+Existing manual answers are preserved by the fallback paths. A live leader
+can still replace a manual, AI, or random answer after two readings.
+The extension can upgrade its own random answer when AI becomes available.
+It does not label AI or random guesses as live votes.
+If both fallbacks are off, it waits for readable live votes. Without AI
+enabled, a visible tie keeps the current answer rather than guessing.
 
-MAJORITY VISIBILITY
-The top of the popup explicitly reports whether it can see the live leader:
-- Yes (green): readable counts identify a leader, with its letter and share.
-- No (red): live counts are unavailable or the reporting request failed.
-- Tied / No votes yet (amber): counts are readable, but there is no leader.
-- Checking / Not checking / Unknown (gray): visibility is not yet confirmed,
-  automation is paused, or the current poll cannot be confirmed.
-- Out of date (gray): the last readable result is more than 20 seconds old.
-The indicator updates while the popup is open, even as a prior result ages.
-It reflects the latest live report, not whether a random answer was selected
-or whether the answer is correct. A leader need not have over 50% of votes.
-An unreadable report is never displayed as visible merely because a letter
-has already been selected.
+BACKGROUND TABS
+A service-worker scheduler targets a check every five seconds. It sends
+wake messages to the original iClicker document, independent of that page's
+poll timer. A 30-second alarm recovers scheduling if Chrome suspends the
+worker. Multiple checks cannot overlap for the same page.
 
-RANDOM FALLBACK (OPTIONAL)
-When enabled, missing vote counts, zero responses, or a 403/404 from the
-reporting endpoint trigger a random choice from visible, enabled A-E buttons.
-The same random letter is retained for that question instead of re-rolling
-every five seconds. Existing selections, including manual answers, are kept.
-If readable counts arrive later, the usual two-reading majority rule resumes.
-Reporting 403/404 responses are retried after a 15-second cooldown, not cached
-forever. Majority-only mode also keeps checking instead of stopping on these
-reporting errors. Each retry uses the same signed-in student permissions.
-A random choice is a guess, not a detected majority or correct answer.
+While running, the extension marks the iClicker tab non-auto-discardable,
+then restores its prior setting when stopped. Chrome must stay open and the
+computer awake. Forced tab freezing, browser shutdown, crashes, and system
+sleep can still interrupt operation. This is not a hard real-time scheduler.
+Refreshing or closing the iClicker tab pauses automation; start it again.
+Settings are per-page and reset to off on refresh.
 
-The active question must still be identified and verified as open through
-the student API. Random fallback does not bypass sign-in, class access,
-question checks, or disabled buttons. Network failures, rate limits, and
-malformed data do not trigger guesses. With fallback off, unavailable counts
-leave your answer unchanged while reports are rechecked. Authentication and
-non-reporting access errors still stop the extension.
+If exactly one iClicker tab is running, opening the popup from another tab
+shows and controls that running tab. If several are running, open the
+specific iClicker tab you want to control. Use one running tab per class.
+The extension does not spoof visibility/focus or suppress iClicker events.
+iClicker may record when you switch tabs.
 
-The extension does not log in, join classes, fake attendance, solve questions,
-answer quizzes, or handle multiple-answer, numeric, text, target, or group polls.
-You must keep the class tab open. Chrome can throttle background/sleeping tabs.
-Click Pause to stop. Refreshing or closing the tab resets it to paused and
-turns Random fallback off. Closing only the popup keeps the tab settings.
-Use one running tab per class to avoid conflicting selections.
+LOCAL AI SETUP
+Open AI setup from the popup and click Prepare local AI. Keep that setup
+tab open; it can be in the background. It hosts the local model because the
+model API requires a document context, not a service worker.
 
-ANSWER HISTORY
-The popup lists the last 200 automatic selection attempts, newest first.
-Each entry shows the question label, selected letter, time, course identifier,
-and source: Random or Live votes. Live-vote entries include the percentage
-observed when the choice was made.
+The feature uses Chrome's built-in LanguageModel / Prompt API. A supported
+desktop Chrome version, compatible hardware, and a model download may be
+required. Chrome documents substantial disk and memory requirements at:
+https://developer.chrome.com/docs/ai/prompt-api
 
-The source is recorded at the moment of the automatic click. A random answer
-that later happens to match the majority stays labeled Random. If a live
-majority causes a different letter to be selected, a new Live votes entry
-appears; the earlier random pick remains in the history.
+No external AI account or API key is used. Question content stays on this
+computer. If the API is missing, a model cannot be prepared, or that tab
+is closed, the popup reports why AI is unavailable and can fall back randomly.
+The extension works without AI setup, but cannot independently solve
+questions until a compatible on-device model is ready.
 
-Manual or already-selected answers are not logged or credited to the
-extension. Repeated checks of the same selection do not create duplicates.
-History records clicks, not confirmed server submissions or correct answers.
-If a click fails to submit, its selection attempt still appears in history.
-Check iClicker's own confirmation for submission status.
+AI reads iClicker's displayed extracted question text. It can also use a
+rendered question image when the image can be copied safely by the browser
+and the local model supports images. Instructor-hidden placeholders are
+excluded. Cross-origin images without readable pixel access cannot be used;
+if text is also missing, random fallback is used rather than inventing a
+question. Unsupported image-only questions cannot be solved automatically.
 
-History persists across popup closure, tab refresh, and browser restarts.
-You can view it from the extension popup even outside an iClicker tab.
-Clear history removes all stored entries; future automatic clicks are still
-recorded. It does not stop automation. Uninstalling removes stored history.
-Older entries are automatically dropped once the 200-entry limit is reached.
-Logging starts with this version and cannot reconstruct previous choices.
-If saving history fails, automation pauses with an explicit error instead of
-continuing with untracked selections.
+Question input is size-limited, and AI must return one allowed answer letter.
+The engine has a 20-second inference timeout; the worker has a 25-second
+response timeout. Invalid/uncertain outputs use the fallback instead.
+AI failures are shown explicitly and retried no more than once per 30 seconds
+for unchanged question content. Successful answers are cached per question.
+AI can be wrong. Question changes, closure, pause, and disabled buttons are
+rechecked before clicking, so a delayed AI result cannot submit to a new poll.
 
-IMPORTANT LIMITATION
-This is an independent extension, not affiliated with iClicker or ByeClicker.
-It uses the current student API response shapes and answer controls inspected
-in the public iClicker web client. Its API has no compatibility guarantee.
-Live authenticated compatibility has not been established for your account.
+LIVE-VOTE ACCESS AND LIMITATIONS
+Student API GET requests now run in the service worker with the iClicker
+host permission, avoiding page-level CORS restrictions. Requests retain the
+student's authentication and include the student client tag. No instructor
+credentials, alternate-account access, or access-control bypass is used.
 
-The student reporting API must expose current class response percentages
-while voting is still open. Some courses/accounts may not provide this.
-Results available only after a poll closes cannot be used to answer it.
-A 401, a 403/404 outside the reporting endpoint, malformed data, or an
-unconfirmed submission stops the extension with an explanation.
-Reporting 403/404 errors trigger a 15-second retry cooldown in either mode.
-It does not bypass access restrictions.
-If the live-data prerequisite is not met, this cannot perform majority voting.
-No algorithm can infer an actual class majority from hidden vote counts.
+The reporting API must actually expose current question counts to the
+student account. Its public client code does NOT prove that a particular
+account can access open-poll counts. Results visible only after closure
+cannot be used to submit an answer to that closed poll.
+
+Reporting 403/404 errors get a 15-second cooldown before retrying. A failed
+report alone can use AI/random fallback after the current question has been
+identified and verified. Malformed vote reports are treated as unavailable
+in AI mode, never as a live majority; without AI mode they stop automation.
+Missing sign-in, denied question/class access, malformed question metadata,
+and rate limiting do not trigger blind submission.
+Rate limits enforce at least a 60-second pause.
+
+Only individual single-answer A-E polls are supported. No quiz, group,
+numeric, text, target, multiple-answer, attendance, or automatic class joining.
+The extension does not know whether an answer is correct or guarantee grades.
+No live class account was available during development; account-specific
+API access and real model quality still depend on your environment.
+
+STATUS AND HISTORY
+The popup shows:
+- Majority vote visible: Yes and the leader/share, No when unavailable,
+  Tied/No votes yet, or Checking/Unknown/Out of date when not current.
+- Background polling status, separate from the active tab's focus.
+- AI status and reasons it could not read or answer a question.
+- The last 200 automatic clicks labeled Live votes, Local AI, or Random.
+
+History includes the question label, chosen letter, time, course identifier,
+and live percentage when applicable. The source is fixed when clicked.
+A random answer that happens to match a later majority remains Random.
+Changing answers creates a separate entry. Repeated checks and manual clicks
+do not create entries. History is a record of attempts, not server receipts.
+Check iClicker's own confirmation to know an answer was accepted.
+
+History stays in this browser profile, not Chrome Sync. Clear history deletes
+stored entries without stopping future automation. Uninstalling clears it.
+If saving a selection fails, automation pauses and reports the failure.
 
 PRIVACY AND PERMISSIONS
-Runs only on https://student.iclicker.com.
-Reads your existing iClicker session token in memory and sends it only to
-https://api.iclicker.com for authorized student GET requests.
-The selection history stores course/activity/question identifiers, question
-labels, answer letters, sources, timestamps, and the leading percentage for
-live-vote selections locally in this Chrome profile (not Chrome Sync).
-No credentials, question images, full question text, or complete vote
-distributions are stored. No data is sent to third-party services.
-Redirects are rejected. No analytics, external libraries, or broad tab access.
-The storage permission and a small event-driven background service worker
-keep history consistent across tabs. The worker never calls iClicker's API.
-activeTab is used to connect the popup to the tab you opened it from.
-Chrome's content-script isolation does not bypass API CORS restrictions.
+Site access is limited to student.iclicker.com and api.iclicker.com.
+The existing session token is passed only to the extension worker and then
+to the fixed api.iclicker.com host for allowed student GET routes. Tokens
+are not saved or logged. Redirects and arbitrary request URLs are rejected.
 
-COURSE RULES
-Use only where your course permits automation. Popular answers can be wrong.
-The extension's automatic clicks submit answers through the normal iClicker
-interface. Always check iClicker's own confirmation.
+Question text/images are passed only to the extension's on-device AI page
+and retained only in memory. They are not included in history, uploaded to
+an AI server, or exported. Chrome may download its local model.
+History stores identifiers, short question labels, letters, sources, times,
+and live percentages, not images or complete vote distributions.
+Session storage holds scheduler metadata so a worker restart can recover.
+
+No analytics, third-party scripts, credential scraping, or focus spoofing.
+Use only where your course permits automation. This extension is independent
+of iClicker, Macmillan, and ByeClicker.
 
 DEVELOPMENT
-Requires Node.js 18+ only for tests, not to use the extension.
-From this folder: node --test
-No build step or package installation is required.
+Run node --test from this folder (Node.js 18+). No build or package install.
+Load the folder as an unpacked extension in Chrome 120+; local AI requires
+a newer compatible Chrome version and hardware.
